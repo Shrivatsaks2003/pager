@@ -17,9 +17,15 @@ class BleService {
   BluetoothDevice? _device;
   BluetoothCharacteristic? _characteristic;
   StreamSubscription<List<int>>? _notifySub;
+  StreamSubscription<BluetoothConnectionState>?
+      _deviceStateSub;
+  final StreamController<bool> _connectionController =
+      StreamController<bool>.broadcast();
+  bool _isConnected = false;
 
-  bool get isConnected =>
-      _device != null && _characteristic != null;
+  bool get isConnected => _isConnected;
+  Stream<bool> get connectionStream =>
+      _connectionController.stream;
 
   // ========================= CONNECT =========================
 
@@ -77,6 +83,14 @@ class BleService {
       );
 
       _device = foundDevice;
+      _deviceStateSub = foundDevice.connectionState.listen(
+        (state) {
+          if (state ==
+              BluetoothConnectionState.disconnected) {
+            _handleUnexpectedDisconnect();
+          }
+        },
+      );
 
       // Discover services
       List<BluetoothService> services =
@@ -106,6 +120,7 @@ class BleService {
                 },
               );
 
+              _setConnected();
               debugPrint("=== BLE CONNECTED ===");
               return true;
             }
@@ -114,9 +129,12 @@ class BleService {
       }
 
       debugPrint("Characteristic not found");
+      await foundDevice.disconnect();
+      _setDisconnected();
       return false;
     } catch (e) {
       debugPrint("BLE Error: $e");
+      _setDisconnected();
       return false;
     }
   }
@@ -146,14 +164,49 @@ class BleService {
   // ========================= DISCONNECT =========================
 
   Future<void> disconnect() async {
+    final device = _device;
+
     try {
       await _notifySub?.cancel();
-      await _device?.disconnect();
+      await _deviceStateSub?.cancel();
+      await device?.disconnect();
     } catch (_) {}
 
-    _device = null;
-    _characteristic = null;
+    _setDisconnected();
 
     debugPrint("BLE Disconnected");
+  }
+
+  void _setConnected() {
+    if (_isConnected) return;
+    _isConnected = true;
+    _connectionController.add(true);
+  }
+
+  void _setDisconnected() {
+    final hadConnection = _isConnected ||
+        _device != null ||
+        _characteristic != null;
+
+    _notifySub = null;
+    _deviceStateSub = null;
+    _device = null;
+    _characteristic = null;
+    _isConnected = false;
+
+    if (hadConnection) {
+      _connectionController.add(false);
+    }
+  }
+
+  void _handleUnexpectedDisconnect() {
+    _setDisconnected();
+    debugPrint("BLE link lost unexpectedly");
+  }
+
+  void dispose() {
+    _notifySub?.cancel();
+    _deviceStateSub?.cancel();
+    _connectionController.close();
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/active_session.dart';
@@ -16,6 +17,23 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState
     extends State<DashboardScreen> {
   bool _connecting = false;
+  StreamSubscription<bool>? _bleConnectionSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _bleConnectionSub =
+        BleService.instance.connectionStream.listen((_) {
+      if (!mounted) return;
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _bleConnectionSub?.cancel();
+    super.dispose();
+  }
 
   // ================= CONNECT / DISCONNECT =================
 
@@ -53,7 +71,6 @@ class _DashboardScreenState
       );
     }
 
-    setState(() {}); // refresh bluetooth icon
   }
 
   // ================= ASSIGN DIALOG =================
