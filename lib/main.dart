@@ -6,9 +6,10 @@ import 'package:pager/models/pager_device.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_screen.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Lock portrait mode
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
@@ -20,9 +21,6 @@ void main() async {
 
   await Hive.openBox<PagerDevice>('pagers');
   await Hive.openBox<ActiveSession>('sessions');
-
-  // 🔥 TEMPORARY: Clear old sessions (run once only)
-  await Hive.box<ActiveSession>('sessions').clear();
 
   runApp(const PagerApp());
 }
