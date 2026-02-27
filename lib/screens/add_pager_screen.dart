@@ -78,6 +78,13 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
   }
 
   @override
+  void dispose() {
+    macController.dispose();
+    manualNumberController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Register Pager")),
@@ -180,6 +187,12 @@ class _QRScannerPageState extends State<_QRScannerPage> {
   bool scanned = false;
 
   @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
@@ -202,10 +215,11 @@ class _QRScannerPageState extends State<_QRScannerPage> {
 
               if (barcode != null) {
                 scanned = true;
+                final navigator = Navigator.of(context);
                 await controller.stop();
 
                 if (!mounted) return;
-                Navigator.pop(context, barcode);
+                navigator.pop(barcode);
               }
             },
           ),
@@ -224,7 +238,12 @@ class _QRScannerPageState extends State<_QRScannerPage> {
             left: 20,
             child: IconButton(
               icon: const Icon(Icons.arrow_back, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                await controller.stop();
+                if (!mounted) return;
+                navigator.pop();
+              },
             ),
           ),
         ],

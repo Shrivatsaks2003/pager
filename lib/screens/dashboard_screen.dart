@@ -256,6 +256,21 @@ class _DashboardScreenState
     session.delete();
   }
 
+  Future<void> _sendAlertForSession(
+      ActiveSession session) async {
+    if (!BleService.instance.isConnected) {
+      return;
+    }
+
+    final pagerBox = Hive.box<PagerDevice>('pagers');
+
+    final pager = pagerBox.values.firstWhere(
+      (p) => p.pagerNumber == session.pagerNumber,
+    );
+
+    await BleService.instance.send(pager.macAddress);
+  }
+
   // ================= BUILD =================
 
   @override
@@ -315,6 +330,9 @@ class _DashboardScreenState
                 onDelete: () =>
                     _deleteSession(
                         session),
+                onRingAlert: () {
+                  _sendAlertForSession(session);
+                },
                 onStatusChange:
                     () async {
                   if (session.status ==
@@ -322,24 +340,8 @@ class _DashboardScreenState
                       BleService
                           .instance
                           .isConnected) {
-                    final pagerBox =
-                        Hive.box<
-                                PagerDevice>(
-                            'pagers');
-
-                    final pager =
-                        pagerBox.values
-                            .firstWhere(
-                      (p) =>
-                          p.pagerNumber ==
-                          session
-                              .pagerNumber,
-                    );
-
-                    await BleService
-                        .instance
-                        .send(
-                            pager.macAddress);
+                    await _sendAlertForSession(
+                        session);
                   }
                 },
               );

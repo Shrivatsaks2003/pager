@@ -5,12 +5,14 @@ class SessionCard extends StatelessWidget {
   final ActiveSession session;
   final VoidCallback onDelete;
   final VoidCallback onStatusChange;
+  final VoidCallback onRingAlert;
 
   const SessionCard({
     super.key,
     required this.session,
     required this.onDelete,
     required this.onStatusChange,
+    required this.onRingAlert,
   });
 
   Color _statusColor(String status) {
@@ -92,6 +94,14 @@ class SessionCard extends StatelessWidget {
                         fontWeight: FontWeight.bold),
                   ),
                 ),
+                if (session.status == "preparing") ...[
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: onRingAlert,
+                    icon: const Icon(Icons.notifications_active),
+                    label: const Text("Ring"),
+                  ),
+                ],
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.delete),
