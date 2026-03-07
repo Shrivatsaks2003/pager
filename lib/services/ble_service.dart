@@ -3,6 +3,35 @@ import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter/foundation.dart';
 
+class MasterCsvFetchResult {
+  final String? csv;
+  final String? error;
+
+  const MasterCsvFetchResult({this.csv, this.error});
+
+  bool get isSuccess => csv != null && error == null;
+}
+
+class MasterPagerCsvRow {
+  final int pagerNumber;
+  final String serial;
+  final String mac;
+  final bool active;
+  final String lastCommand;
+  final String lastAck;
+  final String lastAckTime;
+
+  const MasterPagerCsvRow({
+    required this.pagerNumber,
+    required this.serial,
+    required this.mac,
+    required this.active,
+    required this.lastCommand,
+    required this.lastAck,
+    required this.lastAckTime,
+  });
+}
+
 class BleService {
   BleService._();
   static final BleService instance = BleService._();
@@ -200,6 +229,129 @@ class BleService {
     );
   }
 
+  Future<String?> deletePager(int pagerNumber) {
+    return sendAndWaitForResponse(
+      "DELETE:$pagerNumber",
+      match: (message) =>
+          message.startsWith("OK:") || message.startsWith("ERROR:"),
+    );
+  }
+
+  Future<MasterCsvFetchResult> fetchMasterCsvReport({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    if (_characteristic == null || !_isConnected) {
+      return const MasterCsvFetchResult(error: "Not connected to master");
+    }
+
+    final completer = Completer<MasterCsvFetchResult>();
+    final csvBuffer = StringBuffer();
+    bool started = false;
+
+    late final StreamSubscription<String> responseSub;
+    Timer? timer;
+
+    void finish(MasterCsvFetchResult result) {
+      if (completer.isCompleted) return;
+      timer?.cancel();
+      responseSub.cancel();
+      completer.complete(result);
+    }
+
+    void consumeChunk(String payload) {
+      final endIndex = payload.indexOf("\nCSV_END");
+      if (endIndex >= 0) {
+        csvBuffer.write(payload.substring(0, endIndex));
+        finish(MasterCsvFetchResult(csv: csvBuffer.toString().trimRight()));
+      } else {
+        csvBuffer.write(payload);
+      }
+    }
+
+    responseSub = messageStream.listen((message) {
+      if (!started && message.startsWith("ERROR:")) {
+        finish(MasterCsvFetchResult(error: message));
+        return;
+      }
+
+      if (!started) {
+        final startIndex = message.indexOf("CSV_START\n");
+        if (startIndex < 0) return;
+
+        started = true;
+        final payload = message.substring(startIndex + 10);
+        consumeChunk(payload);
+        return;
+      }
+
+      consumeChunk(message);
+    });
+
+    final sent = await send("/master_excel");
+    if (!sent) {
+      finish(const MasterCsvFetchResult(error: "Failed to request /master_excel"));
+      return completer.future;
+    }
+
+    timer = Timer(timeout, () {
+      if (!started) {
+        finish(
+          const MasterCsvFetchResult(
+            error: "Timed out waiting for CSV_START from master",
+          ),
+        );
+      } else {
+        finish(
+          const MasterCsvFetchResult(
+            error: "Timed out while receiving CSV_END from master",
+          ),
+        );
+      }
+    });
+
+    return completer.future;
+  }
+
+  List<MasterPagerCsvRow> parseMasterCsv(String csvText) {
+    final lines = const LineSplitter()
+        .convert(csvText)
+        .where((line) => line.trim().isNotEmpty)
+        .toList();
+
+    if (lines.isEmpty) return const [];
+
+    final rows = <MasterPagerCsvRow>[];
+    final dataLines = lines.first.toLowerCase().startsWith("pagernumber")
+        ? lines.skip(1)
+        : lines;
+
+    for (final line in dataLines) {
+      final cells = _splitCsvLine(line);
+      if (cells.length < 7) continue;
+
+      final pagerNumber = int.tryParse(cells[0].trim());
+      final serial = cells[1].trim();
+      final mac = cells[2].trim().toUpperCase();
+      final activeRaw = cells[3].trim().toUpperCase();
+
+      if (pagerNumber == null || mac.isEmpty) continue;
+
+      rows.add(
+        MasterPagerCsvRow(
+          pagerNumber: pagerNumber,
+          serial: serial,
+          mac: mac,
+          active: activeRaw == "YES" || activeRaw == "TRUE" || activeRaw == "1",
+          lastCommand: cells[4].trim(),
+          lastAck: cells[5].trim(),
+          lastAckTime: cells[6].trim(),
+        ),
+      );
+    }
+
+    return rows;
+  }
+
   // ========================= DISCONNECT =========================
 
   Future<void> disconnect() async {
@@ -316,5 +468,38 @@ class BleService {
     }
 
     return true;
+  }
+
+  List<String> _splitCsvLine(String line) {
+    final cells = <String>[];
+    final current = StringBuffer();
+    bool inQuotes = false;
+
+    for (int i = 0; i < line.length; i++) {
+      final char = line[i];
+
+      if (char == '"') {
+        final isEscapedQuote =
+            inQuotes && i + 1 < line.length && line[i + 1] == '"';
+        if (isEscapedQuote) {
+          current.write('"');
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+        continue;
+      }
+
+      if (char == ',' && !inQuotes) {
+        cells.add(current.toString());
+        current.clear();
+        continue;
+      }
+
+      current.write(char);
+    }
+
+    cells.add(current.toString());
+    return cells;
   }
 }

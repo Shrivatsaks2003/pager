@@ -64,6 +64,12 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
     return parts.join(':');
   }
 
+  int? _extractPagerNumberFromAddResponse(String response) {
+    final match = RegExp(r'#\s*(\d+)').firstMatch(response);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
+
   Future<void> _savePager() async {
     if (_saving) return;
 
@@ -135,9 +141,27 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
       return;
     }
 
+    final masterPagerNumber =
+        _extractPagerNumberFromAddResponse(response) ?? pagerNumber;
+    final pagerNumberConflict = box.values.any(
+      (p) =>
+          p.pagerNumber == masterPagerNumber &&
+          _normalizeMac(p.macAddress) != mac,
+    );
+    if (pagerNumberConflict) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Master assigned pager #$masterPagerNumber, but local data conflicts. Run sync in Settings.",
+          ),
+        ),
+      );
+      return;
+    }
+
     final pager = PagerDevice(
       macAddress: mac,
-      pagerNumber: pagerNumber,
+      pagerNumber: masterPagerNumber,
       isAssigned: false,
     );
 

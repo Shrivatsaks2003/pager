@@ -8,7 +8,7 @@ class PagerDevice extends HiveObject {
   final String macAddress;
 
   @HiveField(1)
-  final int pagerNumber;
+  int pagerNumber;
 
   @HiveField(2)
   bool isAssigned;
