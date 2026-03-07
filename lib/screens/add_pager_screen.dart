@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../models/pager_device.dart';
+import '../services/ble_service.dart';
 
 class AddPagerScreen extends StatefulWidget {
   const AddPagerScreen({super.key});
@@ -15,6 +17,21 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
   final manualNumberController = TextEditingController();
 
   bool autoGenerate = true;
+  bool _saving = false;
+  StreamSubscription<String>? _bleMessageSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _bleMessageSub = BleService.instance.messageStream.listen((message) {
+      if (!mounted) return;
+      if (message.startsWith("ACK: ADD:")) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
+    });
+  }
 
   void _scanQR() async {
     final result = await Navigator.push(
@@ -31,21 +48,41 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
 
   int _getNextPagerNumber(Box<PagerDevice> box) {
     if (box.isEmpty) return 1;
-    final maxNumber =
-        box.values.map((e) => e.pagerNumber).reduce((a, b) => a > b ? a : b);
+    final maxNumber = box.values
+        .map((e) => e.pagerNumber)
+        .reduce((a, b) => a > b ? a : b);
     return maxNumber + 1;
   }
 
-  void _savePager() {
+  String? _normalizeMac(String input) {
+    final cleaned = input.replaceAll(RegExp(r'[^0-9a-fA-F]'), '').toUpperCase();
+
+    if (cleaned.length != 12) return null;
+
+    final parts = List.generate(6, (i) => cleaned.substring(i * 2, i * 2 + 2));
+
+    return parts.join(':');
+  }
+
+  Future<void> _savePager() async {
+    if (_saving) return;
+
     final box = Hive.box<PagerDevice>('pagers');
-    final mac = macController.text.trim();
+    final mac = _normalizeMac(macController.text.trim());
 
-    if (mac.isEmpty) return;
-
-    if (box.values.any((p) => p.macAddress == mac)) {
+    if (mac == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("MAC already exists")),
+        const SnackBar(content: Text("Invalid MAC. Use AA:BB:CC:DD:EE:FF")),
       );
+      return;
+    }
+
+    final exists = box.values.any((p) => _normalizeMac(p.macAddress) == mac);
+
+    if (exists) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("MAC already exists")));
       return;
     }
 
@@ -56,7 +93,13 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
     } else {
       if (manualNumberController.text.isEmpty) return;
 
-      pagerNumber = int.parse(manualNumberController.text);
+      pagerNumber = int.tryParse(manualNumberController.text) ?? 0;
+      if (pagerNumber <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Enter a valid pager number")),
+        );
+        return;
+      }
 
       if (box.values.any((p) => p.pagerNumber == pagerNumber)) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -64,6 +107,32 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
         );
         return;
       }
+    }
+
+    if (!BleService.instance.isConnected) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Connect to master first")));
+      return;
+    }
+
+    setState(() => _saving = true);
+    final response = await BleService.instance.addPager(mac);
+    if (!mounted) return;
+    setState(() => _saving = false);
+
+    if (response == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No response from master. Try again.")),
+      );
+      return;
+    }
+
+    if (!response.startsWith("OK:")) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(response)));
+      return;
     }
 
     final pager = PagerDevice(
@@ -74,11 +143,15 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
 
     box.add(pager);
 
-    Navigator.pop(context);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(response)));
+    Navigator.pop(context, true);
   }
 
   @override
   void dispose() {
+    _bleMessageSub?.cancel();
     macController.dispose();
     manualNumberController.dispose();
     super.dispose();
@@ -160,10 +233,10 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _savePager,
-                child: const Text("Save Pager"),
+                onPressed: _saving ? null : _savePager,
+                child: Text(_saving ? "Registering..." : "Save Pager"),
               ),
-            )
+            ),
           ],
         ),
       ),
@@ -227,9 +300,7 @@ class _QRScannerPageState extends State<_QRScannerPage> {
           // White overlay
           Positioned.fill(
             child: IgnorePointer(
-              child: CustomPaint(
-                painter: _ScannerOverlayPainter(),
-              ),
+              child: CustomPaint(painter: _ScannerOverlayPainter()),
             ),
           ),
 
@@ -257,8 +328,7 @@ class _ScannerOverlayPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = Colors.white.withOpacity(0.85);
 
-    final path = Path()
-      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+    final path = Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
 
     final cutout = Rect.fromCenter(
       center: Offset(size.width / 2, size.height / 2),
@@ -266,9 +336,7 @@ class _ScannerOverlayPainter extends CustomPainter {
       height: 260,
     );
 
-    path.addRRect(
-      RRect.fromRectAndRadius(cutout, const Radius.circular(20)),
-    );
+    path.addRRect(RRect.fromRectAndRadius(cutout, const Radius.circular(20)));
 
     path.fillType = PathFillType.evenOdd;
 

@@ -10,20 +10,17 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  State<DashboardScreen> createState() =>
-      _DashboardScreenState();
+  State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState
-    extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> {
   bool _connecting = false;
   StreamSubscription<bool>? _bleConnectionSub;
 
   @override
   void initState() {
     super.initState();
-    _bleConnectionSub =
-        BleService.instance.connectionStream.listen((_) {
+    _bleConnectionSub = BleService.instance.connectionStream.listen((_) {
       if (!mounted) return;
       setState(() {});
     });
@@ -53,8 +50,7 @@ class _DashboardScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              ok ? "Connected to Master" : "Master not found"),
+          content: Text(ok ? "Connected to Master" : "Master not found"),
         ),
       );
     } else {
@@ -66,11 +62,10 @@ class _DashboardScreenState
         _connecting = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Disconnected")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Disconnected")));
     }
-
   }
 
   // ================= ASSIGN DIALOG =================
@@ -89,16 +84,14 @@ class _DashboardScreenState
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final availablePagers =
-                pagerBox.values
-                    .where((p) => !p.isAssigned)
-                    .toList();
+            final availablePagers = pagerBox.values
+                .where((p) => !p.isAssigned)
+                .toList();
 
             return SingleChildScrollView(
               child: Padding(
@@ -106,11 +99,7 @@ class _DashboardScreenState
                   left: 20,
                   right: 20,
                   top: 20,
-                  bottom:
-                      MediaQuery.of(context)
-                              .viewInsets
-                              .bottom +
-                          20,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 20,
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -159,19 +148,15 @@ class _DashboardScreenState
                       value: selectedPagerNumber,
                       items: availablePagers
                           .map(
-                            (pager) =>
-                                DropdownMenuItem<int>(
-                              value:
-                                  pager.pagerNumber,
-                              child: Text(
-                                  "Pager ${pager.pagerNumber}"),
+                            (pager) => DropdownMenuItem<int>(
+                              value: pager.pagerNumber,
+                              child: Text("Pager ${pager.pagerNumber}"),
                             ),
                           )
                           .toList(),
                       onChanged: (value) {
                         setModalState(() {
-                          selectedPagerNumber =
-                              value;
+                          selectedPagerNumber = value;
                         });
                       },
                     ),
@@ -181,51 +166,35 @@ class _DashboardScreenState
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () {
-                          if (nameController
-                                  .text.isEmpty ||
-                              phoneController
-                                  .text.isEmpty ||
-                              orderController
-                                  .text.isEmpty ||
-                              selectedPagerNumber ==
-                                  null) {
+                          if (nameController.text.isEmpty ||
+                              phoneController.text.isEmpty ||
+                              orderController.text.isEmpty ||
+                              selectedPagerNumber == null) {
                             return;
                           }
 
-                          final selectedPager =
-                              pagerBox.values
-                                  .firstWhere(
-                            (p) =>
-                                p.pagerNumber ==
-                                selectedPagerNumber,
+                          final selectedPager = pagerBox.values.firstWhere(
+                            (p) => p.pagerNumber == selectedPagerNumber,
                           );
 
-                          selectedPager
-                              .isAssigned = true;
+                          selectedPager.isAssigned = true;
                           selectedPager.save();
 
-                          final session =
-                              ActiveSession(
-                            orderId:
-                                orderController.text,
-                            customerName:
-                                nameController.text,
-                            phoneNumber:
-                                phoneController.text,
-                            pagerNumber:
-                                selectedPagerNumber!,
-                            createdAt:
-                                DateTime.now(),
+                          final session = ActiveSession(
+                            orderId: orderController.text,
+                            customerName: nameController.text,
+                            phoneNumber: phoneController.text,
+                            pagerNumber: selectedPagerNumber!,
+                            createdAt: DateTime.now(),
                           );
 
                           sessionBox.add(session);
 
                           Navigator.pop(context);
                         },
-                        child:
-                            const Text("Assign"),
+                        child: const Text("Assign"),
                       ),
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -238,16 +207,11 @@ class _DashboardScreenState
 
   // ================= DELETE SESSION =================
 
-  void _deleteSession(
-      ActiveSession session) {
-    final pagerBox =
-        Hive.box<PagerDevice>('pagers');
+  void _deleteSession(ActiveSession session) {
+    final pagerBox = Hive.box<PagerDevice>('pagers');
 
-    final pager = pagerBox.values
-        .firstWhere(
-      (p) =>
-          p.pagerNumber ==
-          session.pagerNumber,
+    final pager = pagerBox.values.firstWhere(
+      (p) => p.pagerNumber == session.pagerNumber,
     );
 
     pager.isAssigned = false;
@@ -256,8 +220,7 @@ class _DashboardScreenState
     session.delete();
   }
 
-  Future<void> _sendAlertForSession(
-      ActiveSession session) async {
+  Future<void> _sendAlertForSession(ActiveSession session) async {
     if (!BleService.instance.isConnected) {
       return;
     }
@@ -271,12 +234,28 @@ class _DashboardScreenState
     await BleService.instance.send(pager.macAddress);
   }
 
+  Future<void> _sendPreparingActionForSession(
+    ActiveSession session,
+    String actionCode,
+  ) async {
+    if (!BleService.instance.isConnected) {
+      return;
+    }
+
+    final pagerBox = Hive.box<PagerDevice>('pagers');
+    final pager = pagerBox.values.firstWhere(
+      (p) => p.pagerNumber == session.pagerNumber,
+    );
+
+    final command = "STATUS:${pager.pagerNumber}:${actionCode.toUpperCase()}";
+    await BleService.instance.send(command);
+  }
+
   // ================= BUILD =================
 
   @override
   Widget build(BuildContext context) {
-    final sessionBox =
-        Hive.box<ActiveSession>('sessions');
+    final sessionBox = Hive.box<ActiveSession>('sessions');
 
     return Scaffold(
       appBar: AppBar(
@@ -286,62 +265,45 @@ class _DashboardScreenState
             icon: Icon(
               BleService.instance.isConnected
                   ? Icons.bluetooth_connected
+                  : (BleService.instance.isReconnecting || _connecting)
+                  ? Icons.bluetooth_searching
                   : Icons.bluetooth_disabled,
             ),
-            onPressed:
-                _connecting ? null : _connectToMaster,
+            onPressed: _connecting ? null : _connectToMaster,
           ),
         ],
       ),
-      floatingActionButton:
-          FloatingActionButton(
+      floatingActionButton: FloatingActionButton(
         onPressed: _openAssignDialog,
         child: const Icon(Icons.add),
       ),
       body: ValueListenableBuilder(
-        valueListenable:
-            sessionBox.listenable(),
-        builder: (context,
-            Box<ActiveSession> box, _) {
-          final sessions =
-              box.values.toList();
+        valueListenable: sessionBox.listenable(),
+        builder: (context, Box<ActiveSession> box, _) {
+          final sessions = box.values.toList();
 
           if (sessions.isEmpty) {
             return const Center(
-              child: Text(
-                "No active sessions",
-                style:
-                    TextStyle(fontSize: 16),
-              ),
+              child: Text("No active sessions", style: TextStyle(fontSize: 16)),
             );
           }
 
           return ListView.builder(
-            padding:
-                const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
             itemCount: sessions.length,
-            itemBuilder:
-                (context, index) {
-              final session =
-                  sessions[index];
+            itemBuilder: (context, index) {
+              final session = sessions[index];
 
               return SessionCard(
                 session: session,
-                onDelete: () =>
-                    _deleteSession(
-                        session),
-                onRingAlert: () {
-                  _sendAlertForSession(session);
+                onDelete: () => _deleteSession(session),
+                onPreparingAction: (actionCode) {
+                  _sendPreparingActionForSession(session, actionCode);
                 },
-                onStatusChange:
-                    () async {
-                  if (session.status ==
-                          "ready" &&
-                      BleService
-                          .instance
-                          .isConnected) {
-                    await _sendAlertForSession(
-                        session);
+                onStatusChange: () async {
+                  if (session.status == "ready" &&
+                      BleService.instance.isConnected) {
+                    await _sendAlertForSession(session);
                   }
                 },
               );

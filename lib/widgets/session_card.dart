@@ -5,14 +5,14 @@ class SessionCard extends StatelessWidget {
   final ActiveSession session;
   final VoidCallback onDelete;
   final VoidCallback onStatusChange;
-  final VoidCallback onRingAlert;
+  final ValueChanged<String> onPreparingAction;
 
   const SessionCard({
     super.key,
     required this.session,
     required this.onDelete,
     required this.onStatusChange,
-    required this.onRingAlert,
+    required this.onPreparingAction,
   });
 
   Color _statusColor(String status) {
@@ -52,9 +52,7 @@ class SessionCard extends StatelessWidget {
     return Card(
       elevation: 3,
       margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -62,10 +60,7 @@ class SessionCard extends StatelessWidget {
           children: [
             Text(
               "Order #${session.orderId}",
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text("Customer: ${session.customerName}"),
@@ -79,7 +74,9 @@ class SessionCard extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _statusColor(session.status),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
                   ),
                   onPressed: next == null
                       ? null
@@ -90,23 +87,27 @@ class SessionCard extends StatelessWidget {
                         },
                   child: Text(
                     session.status.toUpperCase(),
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
                 if (session.status == "preparing") ...[
                   const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onRingAlert,
-                    icon: const Icon(Icons.notifications_active),
-                    label: const Text("Ring"),
+                  Flexible(
+                    child: Wrap(
+                      spacing: 6,
+                      children: ["A", "B", "C", "D", "E"]
+                          .map(
+                            (code) => OutlinedButton(
+                              onPressed: () => onPreparingAction(code),
+                              child: Text(code),
+                            ),
+                          )
+                          .toList(),
+                    ),
                   ),
                 ],
                 const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.delete),
-                  onPressed: onDelete,
-                ),
+                IconButton(icon: const Icon(Icons.delete), onPressed: onDelete),
               ],
             ),
           ],
