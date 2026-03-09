@@ -12,6 +12,15 @@ class MasterCsvFetchResult {
   bool get isSuccess => csv != null && error == null;
 }
 
+class MasterRowsFetchResult {
+  final List<MasterPagerCsvRow>? rows;
+  final String? error;
+
+  const MasterRowsFetchResult({this.rows, this.error});
+
+  bool get isSuccess => rows != null && error == null;
+}
+
 class MasterPagerCsvRow {
   final int pagerNumber;
   final String serial;
@@ -41,6 +50,7 @@ class BleService {
 
   static const String characteristicUuid =
       "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  static const String masterDeviceName = "Restaurant_Master";
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _characteristic;
@@ -70,50 +80,34 @@ class BleService {
     try {
       debugPrint("=== BLE CONNECT STARTED ===");
 
-      // Ensure Bluetooth is ON
-      final state = await FlutterBluePlus.adapterState.first;
+      final state = await FlutterBluePlus.adapterState
+          .where((s) => s == BluetoothAdapterState.on)
+          .first
+          .timeout(const Duration(seconds: 8), onTimeout: () {
+        return BluetoothAdapterState.off;
+      });
       if (state != BluetoothAdapterState.on) {
-        debugPrint("Bluetooth is OFF");
+        debugPrint("Bluetooth adapter is not ON");
         return false;
       }
 
-      BluetoothDevice? foundDevice;
-
-      // Scan ONLY for devices advertising our service UUID
-      await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 10),
-        withServices: [Guid(serviceUuid)],
-      );
-
-      await for (var results in FlutterBluePlus.scanResults) {
-        for (ScanResult r in results) {
-          debugPrint("Device found: ${r.device.platformName}");
-
-          // Match using advertised service UUID
-          bool hasService = r.advertisementData.serviceUuids.any(
-            (uuid) =>
-                uuid.toString().toLowerCase() == serviceUuid.toLowerCase(),
-          );
-
-          if (hasService) {
-            foundDevice = r.device;
-            break;
-          }
-        }
-
-        if (foundDevice != null) break;
-      }
-
-      await FlutterBluePlus.stopScan();
+      final foundDevice = await _scanForMaster();
 
       if (foundDevice == null) {
-        debugPrint("Master not found (UUID not detected)");
+        debugPrint("Master not found in scan");
         return false;
       }
 
       debugPrint("Connecting to ${foundDevice.remoteId}");
 
-      await foundDevice.connect(timeout: const Duration(seconds: 15));
+      try {
+        await foundDevice.connect(timeout: const Duration(seconds: 15));
+      } catch (e) {
+        final msg = e.toString().toLowerCase();
+        if (!msg.contains("already connected")) {
+          rethrow;
+        }
+      }
 
       _device = foundDevice;
       _deviceStateSub = foundDevice.connectionState.listen((state) {
@@ -122,45 +116,35 @@ class BleService {
         }
       });
 
-      // Discover services
-      List<BluetoothService> services = await foundDevice.discoverServices();
-
-      for (BluetoothService service in services) {
-        if (service.uuid.toString().toLowerCase() ==
-            serviceUuid.toLowerCase()) {
-          for (BluetoothCharacteristic char in service.characteristics) {
-            if (char.uuid.toString().toLowerCase() ==
-                characteristicUuid.toLowerCase()) {
-              _characteristic = char;
-
-              // Enable notifications
-              await char.setNotifyValue(true);
-
-              _notifySub = char.lastValueStream.listen((value) {
-                if (value.isEmpty) return;
-                final response = utf8.decode(value);
-                debugPrint("BLE Response: $response");
-                if (_shouldEmitMessage(response)) {
-                  _messageController.add(response);
-                }
-              });
-
-              _setConnected();
-              _isReconnecting = false;
-              _reconnectUntil = null;
-              debugPrint("=== BLE CONNECTED ===");
-              return true;
-            }
-          }
-        }
+      final characteristic = await _findMasterCharacteristic(foundDevice);
+      if (characteristic == null) {
+        debugPrint("Master characteristic not found");
+        await foundDevice.disconnect();
+        _setDisconnected();
+        return false;
       }
 
-      debugPrint("Characteristic not found");
-      await foundDevice.disconnect();
-      _setDisconnected();
-      return false;
+      _characteristic = characteristic;
+      await characteristic.setNotifyValue(true);
+      _notifySub = characteristic.lastValueStream.listen((value) {
+        if (value.isEmpty) return;
+        final response = utf8.decode(value, allowMalformed: true);
+        debugPrint("BLE Response: $response");
+        if (_shouldEmitMessage(response)) {
+          _messageController.add(response);
+        }
+      });
+
+      _setConnected();
+      _isReconnecting = false;
+      _reconnectUntil = null;
+      debugPrint("=== BLE CONNECTED ===");
+      return true;
     } catch (e) {
       debugPrint("BLE Error: $e");
+      try {
+        await FlutterBluePlus.stopScan();
+      } catch (_) {}
       _setDisconnected();
       return false;
     }
@@ -239,6 +223,7 @@ class BleService {
 
   Future<MasterCsvFetchResult> fetchMasterCsvReport({
     Duration timeout = const Duration(seconds: 15),
+    String command = "/MASTER_EXCEL",
   }) async {
     if (_characteristic == null || !_isConnected) {
       return const MasterCsvFetchResult(error: "Not connected to master");
@@ -287,9 +272,9 @@ class BleService {
       consumeChunk(message);
     });
 
-    final sent = await send("/master_excel");
+    final sent = await send(command);
     if (!sent) {
-      finish(const MasterCsvFetchResult(error: "Failed to request /master_excel"));
+      finish(MasterCsvFetchResult(error: "Failed to request $command"));
       return completer.future;
     }
 
@@ -310,6 +295,103 @@ class BleService {
     });
 
     return completer.future;
+  }
+
+  Future<MasterCsvFetchResult> fetchMasterJsonReport({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    if (_characteristic == null || !_isConnected) {
+      return const MasterCsvFetchResult(error: "Not connected to master");
+    }
+
+    final completer = Completer<MasterCsvFetchResult>();
+    final jsonBuffer = StringBuffer();
+    bool started = false;
+
+    late final StreamSubscription<String> responseSub;
+    Timer? timer;
+
+    void finish(MasterCsvFetchResult result) {
+      if (completer.isCompleted) return;
+      timer?.cancel();
+      responseSub.cancel();
+      completer.complete(result);
+    }
+
+    void consumeChunk(String payload) {
+      final endIndex = payload.indexOf("\nJSON_END");
+      if (endIndex >= 0) {
+        jsonBuffer.write(payload.substring(0, endIndex));
+        finish(MasterCsvFetchResult(csv: jsonBuffer.toString().trimRight()));
+      } else {
+        jsonBuffer.write(payload);
+      }
+    }
+
+    responseSub = messageStream.listen((message) {
+      if (!started && message.startsWith("ERROR:")) {
+        finish(MasterCsvFetchResult(error: message));
+        return;
+      }
+
+      if (!started) {
+        final startIndex = message.indexOf("JSON_START\n");
+        if (startIndex < 0) return;
+
+        started = true;
+        final payload = message.substring(startIndex + 11);
+        consumeChunk(payload);
+        return;
+      }
+
+      consumeChunk(message);
+    });
+
+    final sent = await send("GET_REPORT");
+    if (!sent) {
+      finish(const MasterCsvFetchResult(error: "Failed to request GET_REPORT"));
+      return completer.future;
+    }
+
+    timer = Timer(timeout, () {
+      if (!started) {
+        finish(
+          const MasterCsvFetchResult(
+            error: "Timed out waiting for JSON_START from master",
+          ),
+        );
+      } else {
+        finish(
+          const MasterCsvFetchResult(
+            error: "Timed out while receiving JSON_END from master",
+          ),
+        );
+      }
+    });
+
+    return completer.future;
+  }
+
+  Future<MasterRowsFetchResult> fetchMasterRows() async {
+    final csvResult = await fetchMasterCsvReport(command: "/MASTER_EXCEL");
+    if (csvResult.isSuccess && csvResult.csv != null) {
+      final rows = parseMasterCsv(csvResult.csv!);
+      if (rows.isNotEmpty) return MasterRowsFetchResult(rows: rows);
+    }
+
+    final jsonResult = await fetchMasterJsonReport();
+    if (jsonResult.isSuccess && jsonResult.csv != null) {
+      try {
+        final rows = parseMasterJson(jsonResult.csv!);
+        return MasterRowsFetchResult(rows: rows);
+      } catch (e) {
+        return MasterRowsFetchResult(error: "JSON parse failed: $e");
+      }
+    }
+
+    return MasterRowsFetchResult(
+      error: csvResult.error ?? jsonResult.error ?? "Failed to load report",
+    );
   }
 
   List<MasterPagerCsvRow> parseMasterCsv(String csvText) {
@@ -349,6 +431,41 @@ class BleService {
       );
     }
 
+    return rows;
+  }
+
+  List<MasterPagerCsvRow> parseMasterJson(String jsonText) {
+    final decoded = jsonDecode(jsonText);
+    if (decoded is! Map<String, dynamic>) return const [];
+
+    final pagers = decoded["pagers"];
+    if (pagers is! List) return const [];
+
+    final rows = <MasterPagerCsvRow>[];
+    for (final item in pagers) {
+      if (item is! Map) continue;
+      final pagerNumber = int.tryParse("${item["pagerNumber"] ?? ""}");
+      final serial = "${item["serial"] ?? ""}";
+      final mac = "${item["mac"] ?? ""}".toUpperCase();
+      final activeRaw = "${item["active"] ?? false}".toLowerCase();
+      final active = activeRaw == "true" || activeRaw == "1" || activeRaw == "yes";
+      final lastCommand = "${item["lastCommand"] ?? ""}";
+      final lastAck = "${item["lastACK"] ?? ""}";
+      final lastAckTime = "${item["lastACKTime"] ?? ""}";
+
+      if (pagerNumber == null || mac.isEmpty) continue;
+      rows.add(
+        MasterPagerCsvRow(
+          pagerNumber: pagerNumber,
+          serial: serial,
+          mac: mac,
+          active: active,
+          lastCommand: lastCommand,
+          lastAck: lastAck,
+          lastAckTime: lastAckTime,
+        ),
+      );
+    }
     return rows;
   }
 
@@ -468,6 +585,79 @@ class BleService {
     }
 
     return true;
+  }
+
+  Future<BluetoothDevice?> _scanForMaster() async {
+    BluetoothDevice? found;
+
+    Future<void> runScan({
+      required Duration timeout,
+      List<Guid> withServices = const [],
+      required bool Function(ScanResult r) match,
+    }) async {
+      if (found != null) return;
+
+      await FlutterBluePlus.startScan(
+        timeout: timeout,
+        withServices: withServices,
+      );
+
+      try {
+        await for (final results in FlutterBluePlus.scanResults) {
+          for (final r in results) {
+            if (!match(r)) continue;
+            found = r.device;
+            break;
+          }
+          if (found != null) break;
+        }
+      } finally {
+        await FlutterBluePlus.stopScan();
+      }
+    }
+
+    // Pass 1: service UUID filtered (fast + precise when advertised correctly)
+    await runScan(
+      timeout: const Duration(seconds: 8),
+      withServices: [Guid(serviceUuid)],
+      match: (r) {
+        final hasService = r.advertisementData.serviceUuids.any(
+          (uuid) => uuid.toString().toLowerCase() == serviceUuid.toLowerCase(),
+        );
+        return hasService;
+      },
+    );
+    if (found != null) return found;
+
+    // Pass 2: fallback by device name (ESP32 advertising sometimes misses UUID)
+    await runScan(
+      timeout: const Duration(seconds: 8),
+      match: (r) {
+        final advName = r.advertisementData.advName.trim();
+        final platformName = r.device.platformName.trim();
+        return advName == masterDeviceName || platformName == masterDeviceName;
+      },
+    );
+
+    return found;
+  }
+
+  Future<BluetoothCharacteristic?> _findMasterCharacteristic(
+    BluetoothDevice device,
+  ) async {
+    for (int attempt = 0; attempt < 3; attempt++) {
+      final services = await device.discoverServices();
+      for (final service in services) {
+        if (service.uuid.toString().toLowerCase() != serviceUuid) continue;
+        for (final char in service.characteristics) {
+          if (char.uuid.toString().toLowerCase() == characteristicUuid) {
+            return char;
+          }
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    return null;
   }
 
   List<String> _splitCsvLine(String line) {

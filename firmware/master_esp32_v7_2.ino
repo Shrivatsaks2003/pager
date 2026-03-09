@@ -125,7 +125,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
       return;
     }
 
-    if (cmdUpper == "/MASTER_EXCEL") {
+    if (cmdUpper == "/MASTER_EXCEL" || cmdUpper == "MASTER_EXCEL") {
       sendCSVOverBLE();
       return;
     }
@@ -594,6 +594,12 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int len) {
     if (firstColon > 0) ackCmd = statusStr.substring(firstColon + 1);
   }
 
+  // Heartbeat ACKs are too noisy and can destabilize BLE if forwarded/logged
+  // continuously. Keep heartbeat handling internal only.
+  if (ackCmd == "HEARTBEAT") {
+    return;
+  }
+
   if (pagerNum > 0) {
     logACKReceived(pagerNum - 1, ackCmd.c_str());
   }
@@ -926,9 +932,13 @@ void setup() {
 
 void loop() {
   if (Serial.available()) {
-    String serialInput = Serial.readStringUntil('\n');
+    // Works with Serial Monitor line ending = None/CR/LF.
+    String serialInput = Serial.readString();
     serialInput.trim();
-    if (serialInput.equalsIgnoreCase("/master_excel")) {
+    if (serialInput.equalsIgnoreCase("/master_excel") ||
+        serialInput.equalsIgnoreCase("master_excel") ||
+        serialInput.equalsIgnoreCase("excel") ||
+        serialInput.equalsIgnoreCase("master")) {
       printCSVToSerial();
     }
   }

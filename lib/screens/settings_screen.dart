@@ -26,18 +26,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     setState(() => _syncing = true);
-    final result = await BleService.instance.fetchMasterCsvReport();
+    final result = await BleService.instance.fetchMasterRows();
     if (!mounted) return;
     setState(() => _syncing = false);
 
-    if (!result.isSuccess || result.csv == null) {
+    if (!result.isSuccess || result.rows == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.error ?? "Failed to fetch CSV report")),
+        SnackBar(content: Text(result.error ?? "Failed to fetch report")),
       );
       return;
     }
 
-    final allRows = BleService.instance.parseMasterCsv(result.csv!);
+    final allRows = result.rows!;
     final rows = allRows.where((row) => row.active).toList();
     final pagerBox = Hive.box<PagerDevice>('pagers');
     int changed = 0;

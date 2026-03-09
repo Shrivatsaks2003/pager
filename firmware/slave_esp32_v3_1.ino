@@ -200,13 +200,57 @@ void handleStatusAlert(const char *statusText) {
   st.trim();
   st.toUpperCase();
 
-  if (st == "A") st = "PREPARING";
-  else if (st == "B") st = "READY";
-  else if (st == "C") st = "CANCELLED";
-  else if (st == "D") st = "READY";
-  else if (st == "E") st = "PREPARING";
-
-  if (st == "PREPARING") {
+  // Distinct actions for A-E
+  if (st == "A") {
+    for (int i = 0; i < 2; i++) {
+      setAllColor(255, 140, 0);
+      tone(BUZZER_PIN, 1000);
+      delay(250);
+      setAllColor(0, 0, 0);
+      noTone(BUZZER_PIN);
+      delay(150);
+    }
+  } else if (st == "B") {
+    for (int i = 0; i < 3; i++) {
+      setAllColor(0, 255, 0);
+      tone(BUZZER_PIN, 2200);
+      digitalWrite(VIBRATION_PIN, HIGH);
+      delay(220);
+      setAllColor(0, 0, 0);
+      noTone(BUZZER_PIN);
+      digitalWrite(VIBRATION_PIN, LOW);
+      delay(120);
+    }
+  } else if (st == "C") {
+    for (int i = 0; i < 3; i++) {
+      setAllColor(255, 0, 0);
+      tone(BUZZER_PIN, 650);
+      delay(300);
+      setAllColor(0, 0, 0);
+      noTone(BUZZER_PIN);
+      delay(180);
+    }
+  } else if (st == "D") {
+    for (int i = 0; i < 3; i++) {
+      setAllColor(0, 120, 255);
+      tone(BUZZER_PIN, 1800);
+      delay(180);
+      setAllColor(0, 0, 0);
+      noTone(BUZZER_PIN);
+      delay(120);
+    }
+  } else if (st == "E") {
+    for (int i = 0; i < 2; i++) {
+      setAllColor(180, 0, 255);
+      tone(BUZZER_PIN, 1400);
+      digitalWrite(VIBRATION_PIN, HIGH);
+      delay(350);
+      setAllColor(0, 0, 0);
+      noTone(BUZZER_PIN);
+      digitalWrite(VIBRATION_PIN, LOW);
+      delay(200);
+    }
+  } else if (st == "PREPARING") {
     for (int i = 0; i < 3; i++) {
       setAllColor(255, 165, 0);
       tone(BUZZER_PIN, 1200);
@@ -285,8 +329,6 @@ void onDataRecv(const uint8_t *mac, const uint8_t *incomingDataRaw, int len) {
     lastHeartbeatTime = millis();
     heartbeatReceivedOnce = true;
     outOfRange = false;
-
-    sendAckToMaster("HEARTBEAT");
   }
   else if (strcmp(incomingData.command, "STATUS") == 0) {
     Serial.print("Status received: ");

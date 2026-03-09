@@ -247,7 +247,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       (p) => p.pagerNumber == session.pagerNumber,
     );
 
-    final command = "STATUS:${pager.pagerNumber}:${actionCode.toUpperCase()}";
+    // Send by MAC to avoid pager-number mismatch between app and master.
+    final command = "STATUS:${pager.macAddress}:${actionCode.toUpperCase()}";
     await BleService.instance.send(command);
   }
 
