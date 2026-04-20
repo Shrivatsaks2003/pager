@@ -183,28 +183,47 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(title: const Text("Register Pager")),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            GestureDetector(
-              onTap: _scanQR,
-              child: Container(
-                height: 160,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.grey.shade400),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.qr_code_scanner, size: 40),
-                    SizedBox(height: 10),
-                    Text("Tap to Scan QR"),
-                  ],
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _scanQR,
+                borderRadius: BorderRadius.circular(22),
+                child: Ink(
+                  height: 170,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(22),
+                    gradient: LinearGradient(
+                      colors: [
+                        colors.primaryContainer.withValues(alpha: 0.55),
+                        colors.secondaryContainer.withValues(alpha: 0.45),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.qr_code_scanner_rounded, size: 42),
+                      SizedBox(height: 10),
+                      Text(
+                        "Tap to Scan QR",
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -215,31 +234,32 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
               controller: macController,
               decoration: const InputDecoration(
                 labelText: "MAC Address",
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.developer_board_outlined),
               ),
             ),
 
             const SizedBox(height: 25),
 
-            Row(
-              children: [
-                Expanded(
-                  child: RadioListTile<bool>(
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment<bool>(
                     value: true,
-                    groupValue: autoGenerate,
-                    onChanged: (_) => setState(() => autoGenerate = true),
-                    title: const Text("Auto Number"),
+                    icon: Icon(Icons.auto_fix_high_outlined),
+                    label: Text("Auto Number"),
                   ),
-                ),
-                Expanded(
-                  child: RadioListTile<bool>(
+                  ButtonSegment<bool>(
                     value: false,
-                    groupValue: autoGenerate,
-                    onChanged: (_) => setState(() => autoGenerate = false),
-                    title: const Text("Manual"),
+                    icon: Icon(Icons.tune_rounded),
+                    label: Text("Manual"),
                   ),
-                ),
-              ],
+                ],
+                selected: {autoGenerate},
+                onSelectionChanged: (selection) {
+                  setState(() => autoGenerate = selection.first);
+                },
+              ),
             ),
 
             if (!autoGenerate)
@@ -248,7 +268,7 @@ class _AddPagerScreenState extends State<AddPagerScreen> {
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
                   labelText: "Pager Number",
-                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.numbers_outlined),
                 ),
               ),
 
@@ -350,7 +370,7 @@ class _QRScannerPageState extends State<_QRScannerPage> {
 class _ScannerOverlayPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white.withOpacity(0.85);
+    final paint = Paint()..color = Colors.white.withValues(alpha: 0.85);
 
     final path = Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
 

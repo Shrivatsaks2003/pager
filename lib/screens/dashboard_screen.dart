@@ -50,7 +50,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(ok ? "Connected to Master" : "Master not found"),
+          content: Text(
+            ok
+                ? "Connected to master"
+                : (BleService.instance.lastError ?? "Master not found"),
+          ),
         ),
       );
     } else {
@@ -104,11 +108,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    Container(
+                      width: 48,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     const Text(
                       "Assign Pager",
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 20),
@@ -117,7 +130,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       controller: nameController,
                       decoration: const InputDecoration(
                         labelText: "Customer Name",
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person_outline_rounded),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -126,7 +139,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       controller: phoneController,
                       decoration: const InputDecoration(
                         labelText: "Phone Number",
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.call_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -135,7 +148,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       controller: orderController,
                       decoration: const InputDecoration(
                         labelText: "Order ID",
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.receipt_long_outlined),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -143,9 +156,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     DropdownButtonFormField<int>(
                       decoration: const InputDecoration(
                         labelText: "Select Pager",
-                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.notifications_active_outlined),
                       ),
-                      value: selectedPagerNumber,
+                      initialValue: selectedPagerNumber,
                       items: availablePagers
                           .map(
                             (pager) => DropdownMenuItem<int>(
@@ -192,7 +205,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                           Navigator.pop(context);
                         },
-                        child: const Text("Assign"),
+                        child: const Text("Assign Pager"),
                       ),
                     ),
                   ],
@@ -257,16 +270,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final sessionBox = Hive.box<ActiveSession>('sessions');
+    final colors = Theme.of(context).colorScheme;
+    final connected = BleService.instance.isConnected;
+    final connecting = BleService.instance.isReconnecting || _connecting;
+    final statusText = connected
+        ? "Connected"
+        : connecting
+        ? "Connecting..."
+        : "Disconnected";
+    final statusColor = connected
+        ? Colors.green
+        : connecting
+        ? Colors.orange
+        : Theme.of(context).colorScheme.error;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text("Pager Dashboard"),
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Chip(
+              avatar: Icon(
+                connected
+                    ? Icons.bluetooth_connected
+                    : connecting
+                    ? Icons.bluetooth_searching
+                    : Icons.bluetooth_disabled,
+                size: 16,
+                color: statusColor,
+              ),
+              label: Text(statusText),
+              side: BorderSide.none,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(999),
+              ),
+              backgroundColor: colors.surfaceContainerHighest.withValues(
+                alpha: 0.7,
+              ),
+            ),
+          ),
           IconButton(
             icon: Icon(
-              BleService.instance.isConnected
+              connected
                   ? Icons.bluetooth_connected
-                  : (BleService.instance.isReconnecting || _connecting)
+                  : connecting
                   ? Icons.bluetooth_searching
                   : Icons.bluetooth_disabled,
             ),
@@ -276,7 +324,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _openAssignDialog,
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add_rounded),
       ),
       body: ValueListenableBuilder(
         valueListenable: sessionBox.listenable(),
@@ -284,13 +332,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final sessions = box.values.toList();
 
           if (sessions.isEmpty) {
-            return const Center(
-              child: Text("No active sessions", style: TextStyle(fontSize: 16)),
+            return Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerHighest.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.inbox_outlined, size: 36),
+                    SizedBox(height: 10),
+                    Text("No active sessions", style: TextStyle(fontSize: 16)),
+                  ],
+                ),
+              ),
             );
           }
 
           return ListView.builder(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 100),
             itemCount: sessions.length,
             itemBuilder: (context, index) {
               final session = sessions[index];

@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:pager/services/app_config_service.dart';
 
 class MasterCsvFetchResult {
   final String? csv;
@@ -50,8 +51,6 @@ class BleService {
 
   static const String characteristicUuid =
       "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-  static const String masterDeviceName = "Restaurant_Master";
-
   BluetoothDevice? _device;
   BluetoothCharacteristic? _characteristic;
   StreamSubscription<List<int>>? _notifySub;
@@ -66,9 +65,11 @@ class BleService {
   DateTime? _reconnectUntil;
   String? _lastEmittedMessage;
   DateTime? _lastEmittedAt;
+  String? _lastError;
 
   bool get isConnected => _isConnected;
   bool get isReconnecting => _isReconnecting;
+  String? get lastError => _lastError;
   Stream<bool> get connectionStream => _connectionController.stream;
   Stream<String> get messageStream => _messageController.stream;
 
@@ -76,18 +77,29 @@ class BleService {
 
   Future<bool> connect() async {
     _manualDisconnect = false;
+    _lastError = null;
 
     try {
       debugPrint("=== BLE CONNECT STARTED ===");
+      final authCode = AppConfigService.instance.masterAuthCode;
+      if (authCode == null) {
+        _lastError =
+            "Save the master MAC address in Settings before connecting.";
+        return false;
+      }
 
       final state = await FlutterBluePlus.adapterState
           .where((s) => s == BluetoothAdapterState.on)
           .first
-          .timeout(const Duration(seconds: 8), onTimeout: () {
-        return BluetoothAdapterState.off;
-      });
+          .timeout(
+            const Duration(seconds: 8),
+            onTimeout: () {
+              return BluetoothAdapterState.off;
+            },
+          );
       if (state != BluetoothAdapterState.on) {
         debugPrint("Bluetooth adapter is not ON");
+        _lastError = "Bluetooth is turned off.";
         return false;
       }
 
@@ -95,6 +107,8 @@ class BleService {
 
       if (foundDevice == null) {
         debugPrint("Master not found in scan");
+        _lastError =
+            "Master '${AppConfigService.instance.masterBleName}' not found.";
         return false;
       }
 
@@ -119,7 +133,8 @@ class BleService {
       final characteristic = await _findMasterCharacteristic(foundDevice);
       if (characteristic == null) {
         debugPrint("Master characteristic not found");
-        await foundDevice.disconnect();
+        await _disconnectDuringSetup(foundDevice);
+        _lastError ??= "Master service not found on device.";
         _setDisconnected();
         return false;
       }
@@ -135,6 +150,13 @@ class BleService {
         }
       });
 
+      final authenticated = await _authorizeConnection(authCode);
+      if (!authenticated) {
+        await _disconnectDuringSetup(foundDevice);
+        _setDisconnected();
+        return false;
+      }
+
       _setConnected();
       _isReconnecting = false;
       _reconnectUntil = null;
@@ -142,6 +164,7 @@ class BleService {
       return true;
     } catch (e) {
       debugPrint("BLE Error: $e");
+      _lastError ??= "BLE connection failed: $e";
       try {
         await FlutterBluePlus.stopScan();
       } catch (_) {}
@@ -216,6 +239,14 @@ class BleService {
   Future<String?> deletePager(int pagerNumber) {
     return sendAndWaitForResponse(
       "DELETE:$pagerNumber",
+      match: (message) =>
+          message.startsWith("OK:") || message.startsWith("ERROR:"),
+    );
+  }
+
+  Future<String?> renameConnectedMaster(String newName) {
+    return sendAndWaitForResponse(
+      "SET_BLE_NAME:${newName.trim()}",
       match: (message) =>
           message.startsWith("OK:") || message.startsWith("ERROR:"),
     );
@@ -448,7 +479,8 @@ class BleService {
       final serial = "${item["serial"] ?? ""}";
       final mac = "${item["mac"] ?? ""}".toUpperCase();
       final activeRaw = "${item["active"] ?? false}".toLowerCase();
-      final active = activeRaw == "true" || activeRaw == "1" || activeRaw == "yes";
+      final active =
+          activeRaw == "true" || activeRaw == "1" || activeRaw == "yes";
       final lastCommand = "${item["lastCommand"] ?? ""}";
       final lastAck = "${item["lastACK"] ?? ""}";
       final lastAckTime = "${item["lastACKTime"] ?? ""}";
@@ -589,6 +621,7 @@ class BleService {
 
   Future<BluetoothDevice?> _scanForMaster() async {
     BluetoothDevice? found;
+    final targetName = AppConfigService.instance.masterBleName;
 
     Future<void> runScan({
       required Duration timeout,
@@ -635,11 +668,46 @@ class BleService {
       match: (r) {
         final advName = r.advertisementData.advName.trim();
         final platformName = r.device.platformName.trim();
-        return advName == masterDeviceName || platformName == masterDeviceName;
+        return advName == targetName || platformName == targetName;
       },
     );
 
     return found;
+  }
+
+  Future<void> _disconnectDuringSetup(BluetoothDevice device) async {
+    final previousManualDisconnect = _manualDisconnect;
+    _manualDisconnect = true;
+    try {
+      await _notifySub?.cancel();
+      await _deviceStateSub?.cancel();
+      await device.disconnect();
+    } catch (_) {
+      // Ignore cleanup errors during failed setup.
+    } finally {
+      _manualDisconnect = previousManualDisconnect;
+    }
+  }
+
+  Future<bool> _authorizeConnection(String authCode) async {
+    final response = await sendAndWaitForResponse(
+      "AUTH:$authCode",
+      timeout: const Duration(seconds: 5),
+      match: (message) =>
+          message.startsWith("AUTH_OK:") || message.startsWith("ERROR:"),
+    );
+
+    if (response == null) {
+      _lastError = "Master authorization timed out.";
+      return false;
+    }
+
+    if (response.startsWith("AUTH_OK:")) {
+      return true;
+    }
+
+    _lastError = response;
+    return false;
   }
 
   Future<BluetoothCharacteristic?> _findMasterCharacteristic(

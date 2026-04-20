@@ -20,6 +20,11 @@ BLEServer* pServer = NULL;
 BLECharacteristic* pCharacteristic = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
+bool clientAuthenticated = false;
+unsigned long bleConnectedAt = 0;
+unsigned long pendingDisconnectAt = 0;
+unsigned long pendingRestartAt = 0;
+String bleDeviceName = "Restaurant_Master";
 
 Preferences preferences;
 
@@ -39,6 +44,7 @@ Preferences preferences;
 
 // Heartbeat settings
 #define HEARTBEAT_INTERVAL 5000
+#define AUTH_TIMEOUT_MS 5000
 unsigned long lastHeartbeatTime = 0;
 
 // Structure for pager data
@@ -80,6 +86,11 @@ void processSetupCommand(String command);
 void processPagingCommand(String command);
 void sendBLEResponse(String message);
 bool isDigitsOnly(const String &s);
+String sanitizeBleName(String input);
+String getMasterAuthCode();
+void loadBleConfig();
+void saveBleName(String name);
+void scheduleBleDisconnect(String reason);
 void savePagersToFlash();
 void loadPagersFromFlash();
 void writeJSON();
@@ -96,11 +107,16 @@ String getTimestamp();
 class MyServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer* pServer) {
     deviceConnected = true;
+    clientAuthenticated = false;
+    bleConnectedAt = millis();
+    pendingDisconnectAt = 0;
     Serial.println("BLE Client Connected");
   };
 
   void onDisconnect(BLEServer* pServer) {
     deviceConnected = false;
+    clientAuthenticated = false;
+    pendingDisconnectAt = 0;
     Serial.println("BLE Client Disconnected");
   }
 };
@@ -115,10 +131,33 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     command.trim();
 
     Serial.println("Received via BLE: " + command);
-    sendBLEResponse("ACK: " + command + " received");
 
     String cmdUpper = command;
     cmdUpper.toUpperCase();
+
+    if (cmdUpper.startsWith("AUTH:")) {
+      String providedCode = command.substring(5);
+      providedCode.trim();
+      providedCode.toUpperCase();
+
+      if (providedCode == getMasterAuthCode()) {
+        clientAuthenticated = true;
+        sendBLEResponse("AUTH_OK:" + providedCode);
+        Serial.println("BLE client authenticated");
+      } else {
+        sendBLEResponse("ERROR: Invalid authorization code");
+        scheduleBleDisconnect("Invalid BLE auth");
+      }
+      return;
+    }
+
+    if (!clientAuthenticated) {
+      sendBLEResponse("ERROR: AUTH required");
+      scheduleBleDisconnect("Missing BLE auth");
+      return;
+    }
+
+    sendBLEResponse("ACK: " + command + " received");
 
     if (cmdUpper == "GET_REPORT") {
       sendJSONOverBLE();
@@ -158,6 +197,19 @@ class MyCallbacks: public BLECharacteristicCallbacks {
       pagers[idx].serialNum[SERIAL_LEN - 1] = '\0';
       savePagersToFlash();
       sendBLEResponse("OK: Serial for Pager #" + String(idx + 1) + " set to " + label);
+      return;
+    }
+
+    if (cmdUpper.startsWith("SET_BLE_NAME:")) {
+      String requestedName = sanitizeBleName(command.substring(13));
+      if (requestedName.length() == 0) {
+        sendBLEResponse("ERROR: BLE name cannot be empty");
+        return;
+      }
+
+      saveBleName(requestedName);
+      sendBLEResponse("OK: BLE name updated to " + requestedName);
+      pendingRestartAt = millis() + 600;
       return;
     }
 
@@ -289,6 +341,57 @@ bool isDigitsOnly(const String &s) {
     if (!isdigit((unsigned char)s.charAt(i))) return false;
   }
   return true;
+}
+
+String sanitizeBleName(String input) {
+  input.trim();
+  String out = "";
+  for (int i = 0; i < input.length(); i++) {
+    char c = input.charAt(i);
+    if ((unsigned char)c < 32 || (unsigned char)c > 126) continue;
+    out += c;
+    if (out.length() >= 24) break;
+  }
+  out.trim();
+  return out;
+}
+
+String getMasterAuthCode() {
+  String mac = WiFi.macAddress();
+  mac.replace(":", "");
+  mac.toUpperCase();
+  if (mac.length() < 4) return "0000";
+  return mac.substring(mac.length() - 4);
+}
+
+void loadBleConfig() {
+  preferences.begin("master_cfg", true);
+  bleDeviceName = sanitizeBleName(
+    preferences.getString("ble_name", "Restaurant_Master")
+  );
+  preferences.end();
+
+  if (bleDeviceName.length() == 0) {
+    bleDeviceName = "Restaurant_Master";
+  }
+}
+
+void saveBleName(String name) {
+  bleDeviceName = sanitizeBleName(name);
+  if (bleDeviceName.length() == 0) {
+    bleDeviceName = "Restaurant_Master";
+  }
+
+  preferences.begin("master_cfg", false);
+  preferences.putString("ble_name", bleDeviceName);
+  preferences.end();
+
+  Serial.println("BLE name saved: " + bleDeviceName);
+}
+
+void scheduleBleDisconnect(String reason) {
+  Serial.println("Scheduling BLE disconnect: " + reason);
+  pendingDisconnectAt = millis() + 300;
 }
 
 // ==================== BLE RESPONSE ====================
@@ -867,7 +970,9 @@ void setup() {
   esp_now_register_send_cb(OnDataSent);
   esp_now_register_recv_cb(OnDataRecv);
 
-  BLEDevice::init("Restaurant_Master");
+  loadBleConfig();
+
+  BLEDevice::init(bleDeviceName.c_str());
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
@@ -889,7 +994,8 @@ void setup() {
   pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
 
-  Serial.println("BLE Started - Device Name: Restaurant_Master");
+  Serial.println("BLE Started - Device Name: " + bleDeviceName);
+  Serial.println("BLE Auth Code (last 4 MAC digits): " + getMasterAuthCode());
 
   loadPagersFromFlash();
 
@@ -921,6 +1027,9 @@ void setup() {
   Serial.println("  GET_REPORT");
   Serial.println("  /master_excel");
   Serial.println("  SET_SERIAL:<NUM>:<LABEL>");
+  Serial.println("Security commands:");
+  Serial.println("  AUTH:<LAST4MAC>");
+  Serial.println("  SET_BLE_NAME:<NEW_NAME>");
   Serial.println("Serial Monitor: type \"/master_excel\" to print CSV");
   Serial.println("========================================\n");
 
@@ -946,6 +1055,28 @@ void loop() {
   if (millis() - lastHeartbeatTime >= HEARTBEAT_INTERVAL) {
     sendHeartbeat();
     lastHeartbeatTime = millis();
+  }
+
+  if (deviceConnected &&
+      !clientAuthenticated &&
+      pendingDisconnectAt == 0 &&
+      millis() - bleConnectedAt >= AUTH_TIMEOUT_MS) {
+    sendBLEResponse("ERROR: Authorization timeout");
+    scheduleBleDisconnect("BLE auth timeout");
+  }
+
+  if (pendingDisconnectAt != 0 && millis() >= pendingDisconnectAt) {
+    pendingDisconnectAt = 0;
+    if (deviceConnected) {
+      pServer->disconnect(pServer->getConnId());
+    }
+  }
+
+  if (pendingRestartAt != 0 && millis() >= pendingRestartAt) {
+    pendingRestartAt = 0;
+    Serial.println("Restarting to apply BLE name change");
+    delay(200);
+    ESP.restart();
   }
 
   if (!deviceConnected && oldDeviceConnected) {

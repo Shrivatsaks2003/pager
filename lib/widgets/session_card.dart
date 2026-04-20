@@ -48,31 +48,66 @@ class SessionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final next = _nextStatus(session.status);
+    final colors = Theme.of(context).colorScheme;
+    final statusColor = _statusColor(session.status);
 
     return Card(
-      elevation: 3,
       margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              "Order #${session.orderId}",
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                Text(
+                  "Order #${session.orderId}",
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    session.status.toUpperCase(),
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
-            Text("Customer: ${session.customerName}"),
-            Text("Phone: ${session.phoneNumber}"),
-            Text("Pager: ${session.pagerNumber}"),
+            Text(
+              "Customer: ${session.customerName}",
+              style: TextStyle(color: colors.onSurfaceVariant),
+            ),
+            Text(
+              "Phone: ${session.phoneNumber}",
+              style: TextStyle(color: colors.onSurfaceVariant),
+            ),
+            Text(
+              "Pager: ${session.pagerNumber}",
+              style: TextStyle(color: colors.onSurfaceVariant),
+            ),
             const SizedBox(height: 16),
 
             Row(
               children: [
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _statusColor(session.status),
+                    backgroundColor: statusColor,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 12,
@@ -86,7 +121,7 @@ class SessionCard extends StatelessWidget {
                           onStatusChange();
                         },
                   child: Text(
-                    session.status.toUpperCase(),
+                    next == null ? "COMPLETED" : "MARK ${next.toUpperCase()}",
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -99,7 +134,19 @@ class SessionCard extends StatelessWidget {
                           .map(
                             (code) => OutlinedButton(
                               onPressed: () => onPreparingAction(code),
-                              child: Text(code),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: colors.outlineVariant),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                              ),
+                              child: Text(
+                                code,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
                           )
                           .toList(),
@@ -107,7 +154,10 @@ class SessionCard extends StatelessWidget {
                   ),
                 ],
                 const Spacer(),
-                IconButton(icon: const Icon(Icons.delete), onPressed: onDelete),
+                IconButton(
+                  icon: Icon(Icons.delete_outline_rounded, color: colors.error),
+                  onPressed: onDelete,
+                ),
               ],
             ),
           ],
